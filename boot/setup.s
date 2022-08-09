@@ -11,6 +11,21 @@
 ; system to read them from there before the area is overwritten
 ; for buffer-blocks.
 ;
+; > 内存地址  长度  名称
+; > 0x90000	 2	  光标位置
+; > 0x90002	 2    扩展内存数
+; > 0x90004	 2	  显示页面
+; > 0x90006	 1    显示模式
+; > 0x90007	 1	  字符列数
+; > 0x90008	 2	  未知
+; > 0x9000A	 1    显示内存
+; > 0x9000B	 1    显示状态
+; > 0x9000C	 2	  显卡特性参数
+; > 0x9000E	 1    屏幕行数
+; > 0x9000F	 1	  屏幕列数
+; > 0x90080	 16   硬盘1参数表
+; > 0x90090	 16	  硬盘2参数表
+; > 0x901FC	 2    根设备号
 
 ; NOTE; These had better be the same as in bootsect.s;
 
@@ -32,13 +47,17 @@ start:
 
 ; ok, the read went well so we get current cursor position and save it for
 ; posterity.
+; > 调用bios的中断处理
 
 	mov	ax,#INITSEG	; this is done in bootsect already, but...
 	mov	ds,ax
-	mov	ah,#0x03	; read cursor pos
+	mov	ah,#0x03	; > read cursor pos ah 寄存器被赋值为 0x03 表示显示服务里具体的读取光标位置功能
 	xor	bh,bh
 	int	0x10		; save it in known place, con_init fetches
+	; > 调用bios的显示中断服务
+	; > 返回时 dx 寄存器里的值表示光标的位置，具体说来其高八位 dh 存储了行号，低八位 dl 存储了列号
 	mov	[0],dx		; it from 0x90000.
+	; > 存放 dx 的值即光标坐标信息到0内存地址，需要加上ds数据段基址-> 0x90000
 
 ; Get memory size (extended mem, kB)
 
@@ -107,6 +126,7 @@ is_disk1:
 ; now we want to move to protected mode ...
 
 	cli			; no interrupts allowed ;
+	; > 关闭中断；因为后续会自己写中断处理，覆盖bios的中断向量表（中断描述符索引表），不允许再使用中断
 
 ; first we move the system to it's rightful place
 
@@ -123,6 +143,22 @@ do_move:
 	mov 	cx,#0x8000
 	rep
 	movsw
+	; > 整理内存
+	; > 将 system 数据的240个扇区从 0x10000 - 0x90000 移动到 0x00000 - 0x80000
+	; >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+	; 0x9FF00
+	; 栈
+	; 0x91000
+	; setup 代码
+	; 0x90200
+	; 临时存放的变量，光标、显示等
+	; 0x90000  
+
+	; 0x80000
+	; system 全部代码
+	; 0x00000
+	; >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
 	jmp	do_move
 
 ; then we load the segment descriptors

@@ -49,6 +49,12 @@ ROOT_DEV = 0x306
 ; > 启动时固件程序 BIOS 会将硬盘中启动区的512字节的数据（该文件）原封不动的复制到内存0x07c0位置，并跳转到那个位置执行
 ; > 由于 x86 为了让自己在 16 位这个实模式下能访问到 20 位的地址线这个历史因素, 段基址要先左移四位; 即所有的寻址都要先左移四位
 
+; > 操作系统的编译通过 Makefile 和 build.c 配合完成的，最终会：
+; > 操作系统位于硬盘的数据： bootsect 512 bytes -> setup 512 * 4 -> system 512 * 240
+; > 1. 把 bootsect.s 编译成 bootsect 放在硬盘的 1 扇区。
+; > 2. 把 setup.s 编译成 setup 放在硬盘的 2~5 扇区。
+; > 3. 把剩下的全部代码（head.s 作为开头）编译成 system 放在硬盘的随后 240 个扇区。
+
 
 entry start
 start:
@@ -65,17 +71,20 @@ start:
 	movw  ; > 复制一个字 16 位
 	; > 上述代码： 将内存地址 0x7c00 开始的后 256 * 2 = 512 个字节（即存放在硬盘第一扇区）复制到 0x9000； 操作系统的开头代码位于 0x9000
 	jmpi	go,INITSEG  ; > 段间跳转指令, 跳转到 0x9000:go 处执行, 段地址要左移四位: 0x90000 + go
+	; > cs 代码段寄存器值此时 0x9000， ip指令指针 go 偏移量 -> cpu 执行代码 cs:ip
 
 ; >>>>>>>>>>>>>>>>>>>>
-; 硬盘中0盘0道1扇区的512字节的代码和数据, 且最后两字节为 0x55 和 0xaa -> 复制到0x07c0 -> 复制到0x9000 -> 跳转到 0x9000 + go 处
+; > 硬盘中0盘0道1扇区的512字节的代码和数据, 且最后两字节为 0x55 和 0xaa -> 复制到0x7c00 -> 复制到0x90000 -> 跳转到 0x90000 + go 处
 
 ; > 最终会被翻译成一个值 标签在文件内的偏移地址, 即 0x90000 + go
-go: mov	ax,cs
-	mov	ds,ax
-	mov	es,ax
+go: mov	ax,cs ; > 0x9000
+	mov	ds,ax ; > 0x9000 ds 数据寄存器 由 ox7c00 变成 0x90000
+	mov	es,ax ; > 将cs复制给ds、es、ss
 ; put stack at 0x9ff00.
 	mov	ss,ax
-	mov	sp,#0xFF00		; arbitrary value >>512
+	mov	sp,#0xFF00		; > arbitrary value >> 512 栈区，栈顶 0x9FF00
+
+; > 完成内存初步分配：cpu 访问 代码、数据、栈 的基址 + 偏移
 
 ; load the setup-sectors directly after the bootblock.
 ; Note that 'es' is already set up.
@@ -85,8 +94,9 @@ load_setup:
 	mov	cx,#0x0002		; sector 2, track 0
 	mov	bx,#0x0200		; address = 512, in INITSEG
 	mov	ax,#0x0200+SETUPLEN	; service 2, nr of sectors
-	int	0x13			; read it
-	jnc	ok_load_setup		; ok - continue
+	; > 0x13 中断号对应处理程序为bios写好，读取磁盘的相关功能的函数
+	int	0x13			; > read it  复制磁盘的第 2 - 5 共4个扇区的数据到0x90200往上的内存空间
+	jnc	ok_load_setup		; > ok - continue  CF标志位为0即复制成功则跳转
 	mov	dx,#0x0000
 	mov	ax,#0x0000		; reset the diskette
 	int	0x13
@@ -123,6 +133,9 @@ ok_load_setup:
 	mov	ax,#SYSSEG
 	mov	es,ax		; segment of 0x010000
 	call	read_it
+	; > 从硬盘的第 6 - 240 个扇区全部加载到内存 0x10000 往上的空间； 用户空间 .text
+	; > 全部操作系统代码都加载到内存
+
 	call	kill_motor
 
 ; After that we check which root-device to use. If the device is
@@ -153,6 +166,7 @@ root_defined:
 ; the bootblock:
 
 	jmpi	0,SETUPSEG
+	; > 跳转到setup代码区
 
 ; This routine loads the system at address 0x10000, making sure
 ; no 64kB boundaries are crossed. We try to load it as fast as
