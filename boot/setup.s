@@ -214,6 +214,24 @@ end_move:
 	.word	0x00eb,0x00eb
 	out	#0xA1,al
 
+; > PIC     中断号   用途
+; > IRQ0	0x20	时钟中断
+; > IRQ1	0x21	键盘中断
+; > IRQ2	0x22	接连从芯片
+; > IRQ3	0x23	串口2
+; > IRQ4	0x24	串口1
+; > IRQ5	0x25	并口2
+; > IRQ6	0x26	软盘驱动器
+; > IRQ7	0x27	并口1
+; > IRQ8	0x28	实时钟中断
+; > IRQ9	0x29	保留
+; > IRQ10	0x2a	保留
+; > IRQ11	0x2b	保留
+; > IRQ12	0x2c	鼠标中断
+; > IRQ13	0x2d	数学协处理器
+; > IRQ14	0x2e	硬盘中断
+; > IRQ15	0x2f	保留
+
 ; well, that certainly wasn't fun :-(. Hopefully it works, and we don't
 ; need no steenking BIOS anyway (except for the initial loading :-).
 ; The BIOS-routine wants lots of unnecessary data, and it's less
@@ -223,10 +241,17 @@ end_move:
 ; things as simple as possible, we do no register set-up or anything,
 ; we let the gnu-compiled 32-bit programs do that. We just jump to
 ; absolute address 0x00000, in 32-bit protected mode.
-
+	
+	; > 切换模式
 	mov	ax,#0x0001	; protected mode (PE) bit
-	lmsw	ax		; This is it;
+	lmsw	ax		; > This is it; 将 r/m16 加载到 CR0 的机器状态字
+	; > cr0 这个寄存器的位 0 置 1，模式就从实模式切换到保护模式
 	jmpi	0,8		; jmp offset 0 of segment 8 (cs)
+
+	; > 8 -> 0x 0000,0000,1000
+	; > 取第一段基地址为0， 0 + 0 = 0
+	; > 即从 0x0 开始执行system代码， head.s
+
 
 ; This routine checks that the keyboard command queue is empty
 ; No timeout is used - if this hangs there is something wrong with
@@ -239,13 +264,15 @@ empty_8042:
 	ret
 
 gdt:
-	.word	0,0,0,0		; dummy
+	.word	0,0,0,0		; > dummy 第 0 段为空
 
+	; > 第一段
 	.word	0x07FF		; 8Mb - limit=2047 (2048*4096=8Mb)
 	.word	0x0000		; base address=0
 	.word	0x9A00		; code read/exec
 	.word	0x00C0		; granularity=4096, 386
 
+	; > 第二段
 	.word	0x07FF		; 8Mb - limit=2047 (2048*4096=8Mb)
 	.word	0x0000		; base address=0
 	.word	0x9200		; data read/write
@@ -257,7 +284,7 @@ idt_48:
 
 gdt_48:
 	.word	0x800		; gdt limit=2048, 256 GDT entries
-	.word	512+gdt,0x9	; gdt base = 0X9xxxx
+	.word	512+gdt,0x9	; > gdt base = 0X9xxxx, 即最终指向 gdt 标签
 	
 .text
 endtext:
